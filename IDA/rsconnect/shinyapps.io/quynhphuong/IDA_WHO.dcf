@@ -1,0 +1,12 @@
+name: IDA_WHO
+title: IDA_WHO
+username: quynhphuong
+account: quynhphuong
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14961363
+bundleId: 10484426
+url: https://quynhphuong.shinyapps.io/IDA_WHO/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

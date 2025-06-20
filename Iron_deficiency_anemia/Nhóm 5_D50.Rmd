@@ -1,0 +1,677 @@
+---
+title: "Phân tích bệnh nhân thiếu máu do thiếu sắt (D50)"
+author: "Nhóm 5"
+date: "2025-06-18"
+output:
+  word_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **I. ĐỌC VÀ TIỀN XỬ LÝ DỮ LIỆU THEO CHỦ ĐỀ D50: THIẾU MÁU DO THIẾU SẮT (GỒM CÁC MÃ BỆNH NHÂN: D500, D508 và D509)**
+
+## 🔹 1.1. Kết nối với Google Drive
+
+Trong R Markdown, việc kết nối với Google Drive không giống như Colab. Thay vào đó, bạn sẽ truy cập trực tiếp các tệp từ đường dẫn cục bộ.
+
+Nếu bạn muốn đọc file từ Google Drive, bạn sẽ cần sử dụng các package như `googledrive` hoặc tải xuống thủ công file về máy cục bộ. Đối với bài tập này, chúng ta sẽ giả định các file đã được tải về và đặt tại `D:/Downloads/Data2`.
+
+## 🔹 1.2. Nhập các thư viện cần thiết
+
+Trong R, chúng ta sẽ sử dụng các package tương đương để xử lý và phân tích dữ liệu.
+
+```{r setup, include=FALSE}
+# Cài đặt và tải các thư viện cần thiết
+if (!requireNamespace("tidyverse", quietly = TRUE)) install.packages("tidyverse")
+if (!requireNamespace("readxl", quietly = TRUE)) install.packages("readxl")
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+if (!requireNamespace("stringr", quietly = TRUE)) install.packages("stringr")
+if (!requireNamespace("lubridate", quietly = TRUE)) install.packages("lubridate")
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
+if (!requireNamespace("car", quietly = TRUE)) install.packages("car") # For Levene's test
+if (!requireNamespace("ggpubr", quietly = TRUE)) install.packages("ggpubr") # For stat_compare_means
+if (!requireNamespace("broom", quietly = TRUE)) install.packages("broom") # For tidy()
+if (!requireNamespace("rstatix", quietly = TRUE)) install.packages("rstatix") # For t_test
+install.packages("openxlsx")
+
+
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+library(car)
+library(ggpubr)
+library(broom)
+library(rstatix) # For t_test
+library(knitr)
+```
+## 🔹 1.3. Đọc dữ liệu
+```{r}
+# Đường dẫn thư mục trong máy tính
+path <- "D:/Downloads/Data2/"
+
+# Đọc dữ liệu từ file Excel
+admission_df <- read_excel(paste0(path, "admission.xlsx"))
+diagnosis_df <- read_excel(paste0(path, "diagnosis.xlsx"))
+
+# Hiển thị một phần dữ liệu
+cat("📄 TOÀN BỘ BẢNG ADMISSION (20 dòng ngẫu nhiên):\n")
+kable(admission_df %>% sample_n(20))
+
+cat("\n📄 TOÀN BỘ BẢNG DIAGNOSIS (20 dòng ngẫu nhiên):\n")
+kable(diagnosis_df %>% sample_n(20)) 
+```
+## 🔹 1.4. Lọc các chẩn đoán theo mã ICD10
+Nhóm tập trung phân tích các bệnh nhân có mã chẩn đoán:
+- D500: Thiếu máu thiếu sắt do mất máu mạn tính
+- D508: Thiếu máu thiếu sắt khác
+- D509: Thiếu máu thiếu sắt không xác định
+
+```{r}
+# Lọc các mã ICD10 là D500, D508, D509
+target_icds <- c("D500", "D508", "D509")
+filtered_diag <- diagnosis_df %>% filter(diagnosis %in% target_icds)
+```
+## 🔹 1.5. Lấy danh sách các admission_id tương ứng
+Từ bảng diagnosis đã lọc, chúng tôi trích ra tất cả các admission_id liên quan đến các bệnh nhân mang mã D500, D508, D509.
+
+```{r}
+# Lấy danh sách ID phù hợp
+matching_ids <- unique(filtered_diag$admission_id)
+```
+## 🔹 1.6. Lọc bảng Admission và Diagnosis tương ứng
+Từ bảng admission, chỉ giữ lại những dòng có admission_id tương ứng với các bệnh nhân đã được lọc.
+
+```{r}
+# Lọc admission tương ứng với các ID
+filtered_admission <- admission_df %>% filter(admission_id %in% matching_ids)
+
+```
+
+## 🔹 1.7. Xuất file Excel kết quả
+Dữ liệu sau khi lọc được lưu vào file mới: filtered_admission.xlsx và diagnosis_chi_D500_D508_D509.xlsx
+
+```{r}
+# Xuất file kết quả
+library(openxlsx)
+
+write.xlsx(filtered_admission, paste0(path, "filtered_admission.xlsx"))
+cat("✅ File filtered_admission.xlsx đã được lưu vào thư mục.\n")
+
+write.xlsx(filtered_diag, paste0(path, "diagnosis_chi_D500_D508_D509.xlsx"))
+cat("✅ Đã lưu thành công file diagnosis_chi_D500_D508_D509.xlsx\n")
+```
+
+## 🔹 1.8. Kiểm tra độ nhất quán dữ liệu
+Kiểm tra tính nhất quán của dữ liệu bằng cách so sánh các mã định danh giữa các bảng gốc và bảng đã lọc.
+
+```{r}
+# Kiểm tra admission_id
+original_ids <- unique(admission_df$admission_id)
+filtered_ids <- unique(filtered_admission$admission_id)
+
+if (all(filtered_ids %in% original_ids)) {
+  cat("✅ Tất cả admission_id trong file lọc đều trùng khớp với file gốc.\n")
+} else {
+  missing_ids <- setdiff(filtered_ids, original_ids)
+  cat("⚠️ Một số admission_id không tìm thấy trong file gốc:\n")
+  print(missing_ids)
+}
+
+# Kiểm tra chẩn đoán (Diagnosis)
+original_diag_ids <- unique(diagnosis_df$diagnosis)
+filtered_diag_ids <- unique(filtered_diag$diagnosis)
+
+if (all(filtered_diag_ids %in% original_diag_ids)) {
+  cat("✅ Tất cả ID trong file diagnosis đã lọc đều trùng khớp với file gốc.\n")
+} else {
+  missing_diag_ids <- setdiff(filtered_diag_ids, original_diag_ids)
+  cat("⚠️ Một số ID không tìm thấy trong file diagnosis gốc:\n")
+  print(missing_diag_ids)
+}
+```
+
+## 🔹 1.9. Hiển thị bảng admission và diagnosis sau khi lọc
+```{r}
+# Hiển thị toàn bộ bảng admission sau khi lọc
+cat("\n📋 Dữ liệu admission đã lọc:\n")
+kable(filtered_admission)  
+
+# Hiển thị toàn bộ bảng diagnosis sau khi lọc
+cat("\n📋 Dữ liệu diagnosis đã lọc:\n")
+kable(filtered_diag)  
+```
+
+
+# **II. THỐNG KÊ TỔNG QUAN TOÀN BỘ DỮ LIỆU**
+## 🔹 2.1. Đọc dữ liệu từ file đã lọc
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+# Đường dẫn thư mục
+path <- "D:/Downloads/Data2/"
+
+# Đọc dữ liệu đã lọc
+filtered_admission <- read_excel(paste0(path, "filtered_admission.xlsx"))
+diagnosis_filtered <- read_excel(paste0(path, "diagnosis_chi_D500_D508_D509.xlsx"))
+```
+
+##🔹 2.2. Thống kê mô tả
+###🔹 2.2.1. Phân bố giới tính
+```{r}
+# Chuyển đổi mã giới tính
+filtered_admission <- filtered_admission %>%
+  mutate(Gender = case_when(
+    Gender == 1 ~ "Nam",
+    Gender == 2 ~ "Nữ",
+    TRUE ~ "Không xác định"
+  ))
+
+# Thống kê giới tính
+gender_stats <- filtered_admission %>%
+  count(Gender) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Biểu đồ phân bố giới tính
+ggplot(gender_stats, aes(x = Gender, y = n, fill = Gender)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố giới tính bệnh nhân thiếu máu do thiếu sắt",
+       x = "Giới tính", y = "Số lượng") +
+  theme_minimal()
+```
+###🔹 2.2.2. Phân bố tuổi
+```{r}
+# Phân tích độ tuổi
+age_stats <- filtered_admission %>%
+  summarise(
+    Mean = mean(age_years, na.rm = TRUE),
+    Median = median(age_years, na.rm = TRUE),
+    SD = sd(age_years, na.rm = TRUE),
+    Min = min(age_years, na.rm = TRUE),
+    Max = max(age_years, na.rm = TRUE)
+  )
+
+# Phân nhóm tuổi theo cách của Python (0-9, 10-19, ..., 60+)
+filtered_admission <- filtered_admission %>%
+  mutate(age_group = cut(age_years,
+                         breaks = c(0, 10, 20, 30, 40, 50, 60, Inf),
+                         labels = c("0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60+"),
+                         right = FALSE)) # Sử dụng right=FALSE để bao gồm điểm đầu, không bao gồm điểm cuối
+
+# Biểu đồ phân bố độ tuổi (histogram)
+ggplot(filtered_admission, aes(x = age_years)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  labs(title = "Phân bố độ tuổi bệnh nhân thiếu máu do thiếu sắt",
+       x = "Tuổi", y = "Số lượng") +
+  theme_minimal() +
+  geom_vline(xintercept = c(10, 20, 30, 40, 50, 60), linetype = "dashed", color = "red") # Thêm đường kẻ phân nhóm
+
+# Biểu đồ phân bố theo nhóm tuổi (bar chart)
+age_group_stats <- filtered_admission %>%
+  count(age_group) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+ggplot(age_group_stats, aes(x = age_group, y = n, fill = age_group)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố bệnh nhân theo nhóm tuổi",
+       x = "Nhóm tuổi", y = "Số lượng") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_x_discrete(limits = c("0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60+")) # Đảm bảo thứ tự nhóm tuổi
+```
+
+###🔹 2.2.3.Thời gian nằm viện (LOS)
+```{r}
+# Thống kê tổng quan thời gian nằm viện
+los_stats <- filtered_admission %>%
+  summarise(
+    Mean = round(mean(los, na.rm = TRUE), 2),
+    Median = median(los, na.rm = TRUE),
+    SD = round(sd(los, na.rm = TRUE), 2),
+    Min = min(los, na.rm = TRUE),
+    Max = max(los, na.rm = TRUE),
+    N = n()
+  )
+
+# In kết quả thống kê
+print("Thống kê tổng quan thời gian nằm viện:")
+print(los_stats)
+
+# Biểu đồ phân bố LOS tổng thể
+ggplot(filtered_admission, aes(x = los)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(los, na.rm = TRUE)), 
+             color = "red", linetype = "dashed", linewidth = 1) +
+  labs(title = "Phân bố thời gian nằm viện (LOS)",
+       x = "Số ngày nằm viện", y = "Số lượng bệnh nhân") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Phân tích LOS theo nhóm tuổi
+los_by_age <- filtered_admission %>%
+  group_by(age_group) %>%
+  summarise(
+    Mean_LOS = round(mean(los, na.rm = TRUE), 2),
+    Median_LOS = median(los, na.rm = TRUE),
+    SD_LOS = round(sd(los, na.rm = TRUE), 2),
+    N = n()
+  )
+
+# Biểu đồ LOS theo nhóm tuổi
+ggplot(los_by_age, aes(x = age_group, y = Mean_LOS, fill = age_group)) +
+  geom_bar(stat = "identity") +
+  geom_errorbar(aes(ymin = Mean_LOS - SD_LOS, ymax = Mean_LOS + SD_LOS), width = 0.2) +
+  geom_text(aes(label = Mean_LOS), vjust = -0.5) +
+  labs(title = "Thời gian nằm viện trung bình theo nhóm tuổi",
+       x = "Nhóm tuổi", y = "LOS trung bình (ngày)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+# Phân tích LOS theo giới tính
+los_by_gender <- filtered_admission %>%
+  group_by(Gender) %>%
+  summarise(
+    Mean_LOS = round(mean(los, na.rm = TRUE), 2),
+    Median_LOS = median(los, na.rm = TRUE),
+    SD_LOS = round(sd(los, na.rm = TRUE), 2),
+    N = n()
+  )
+
+# Boxplot LOS theo giới tính
+ggplot(filtered_admission, aes(x = Gender, y = los, fill = Gender)) +
+  geom_boxplot(alpha = 0.7) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 3, color = "red") +
+  labs(title = "Phân bố thời gian nằm viện theo giới tính",
+       x = "Giới tính", y = "Số ngày nằm viện") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+# Histogram LOS theo giới tính
+suppressWarnings(
+  ggplot(filtered_admission, aes(x = los, fill = Gender)) +
+    geom_histogram(binwidth = 1, alpha = 0.6, position = "identity") +
+    scale_fill_manual(values = c("male" = "blue", "female" = "pink")) +
+    labs(title = "Phân bố thời gian nằm viện theo giới tính",
+         x = "Số ngày nằm viện", y = "Số lượng bệnh nhân") +
+    facet_wrap(~Gender, ncol = 1) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+)
+
+# Phân tích kết hợp nhóm tuổi và giới tính
+los_by_age_gender <- filtered_admission %>%
+  group_by(age_group, Gender) %>%
+  summarise(
+    Mean_LOS = round(mean(los, na.rm = TRUE), 2),
+    Median_LOS = median(los, na.rm = TRUE),
+    SD_LOS = round(sd(los, na.rm = TRUE), 2),
+    N = n()
+  )
+
+# Biểu đồ kết hợp
+suppressWarnings(
+  ggplot(los_by_age_gender, aes(x = age_group, y = Mean_LOS, fill = Gender)) +
+    geom_bar(stat = "identity", position = position_dodge()) +
+    geom_errorbar(aes(ymin = Mean_LOS - SD_LOS, ymax = Mean_LOS + SD_LOS),
+                  width = 0.2, position = position_dodge(0.9)) +
+    geom_text(aes(label = Mean_LOS), position = position_dodge(width = 0.9), vjust = -0.5) +
+    labs(title = "Thời gian nằm viện trung bình theo nhóm tuổi và giới tính",
+         x = "Nhóm tuổi", y = "LOS trung bình (ngày)") +
+    scale_fill_manual(values = c("male" = "steelblue", "female" = "salmon")) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+)
+
+```
+
+
+##🔹 2.3. Phân loại theo mã bệnh
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Lọc dữ liệu và tính số lượng, phần trăm
+icd_stats <- diagnosis_df %>%
+  filter(diagnosis %in% c("D500", "D508", "D509")) %>%
+  group_by(diagnosis) %>%
+  summarise(So_lan_xuat_hien = n()) %>%
+  mutate(Percentage = So_lan_xuat_hien / sum(So_lan_xuat_hien) * 100) %>%
+  arrange(desc(So_lan_xuat_hien))
+
+# Hiển thị bảng
+print(icd_stats)
+
+# Vẽ biểu đồ
+ggplot(icd_stats, aes(x = diagnosis, y = So_lan_xuat_hien, fill = diagnosis)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố các loại thiếu máu do thiếu sắt",
+       x = "Mã ICD10", y = "Số lượng") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+```
+##🔹 2.4. Phân tích đa biến
+### 🔹 2.4.1. Tương quan giữa tuổi và thời gian nằm viện
+```{r}
+ggplot(filtered_admission, aes(x = age_years, y = los)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Tương quan giữa tuổi và thời gian nằm viện",
+       x = "Tuổi", y = "Thời gian nằm viện (ngày)") +
+  theme_minimal()
+```
+### 🔹 2.4.2. Phân tích ANOVA theo giới tính
+```{r}
+aov_result <- aov(los ~ factor(Gender), data = filtered_admission)
+summary(aov_result)
+```
+## 🔹 2.5. Phân tích nguồn nhập viện
+```{r}
+# Chuyển đổi mã nguồn nhập viện
+admsource_mapping <- c(
+  "H" = "Tự đến",
+  "T" = "Chuyển viện",
+  "N" = "Cấp cứu",
+  "S" = "Phẫu thuật"
+)
+
+filtered_admission <- filtered_admission %>%
+  mutate(admsource = dplyr::recode(admsource, !!!admsource_mapping))
+
+
+# Thống kê nguồn nhập viện
+admsource_stats <- filtered_admission %>%
+  count(admsource) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Biểu đồ nguồn nhập viện
+ggplot(admsource_stats, aes(x = admsource, y = n, fill = admsource)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố nguồn nhập viện",
+       x = "Nguồn nhập viện", y = "Số lượng") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+##🔹 2.6. Phân tích loại điều trị
+```{r}
+# Chuyển đổi mã loại điều trị
+admtype_mapping <- c(
+  "C" = "Nội trú thông thường",
+  "L" = "Nội trú dài ngày",
+  "O" = "Ngoại trú",
+  "X" = "Khác"
+)
+
+filtered_admission <- filtered_admission %>%
+  mutate(admtype = dplyr::recode(admtype, !!!admtype_mapping))
+
+
+# Thống kê loại điều trị
+admtype_stats <- filtered_admission %>%
+  count(admtype) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Biểu đồ loại điều trị
+ggplot(admtype_stats, aes(x = admtype, y = n, fill = admtype)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố loại điều trị",
+       x = "Loại điều trị", y = "Số lượng") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+##🔹 2.7. Phân tích DRG code
+```{r}
+# Thống kê DRG code phổ biến
+drg_stats <- filtered_admission %>%
+  count(nat_drg_code) %>%
+  arrange(desc(n)) %>%
+  head(20)
+
+# Biểu đồ DRG code phổ biến
+ggplot(drg_stats, aes(x = reorder(nat_drg_code, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "20 DRG code phổ biến nhất",
+       x = "DRG Code", y = "Số lượng") +
+  theme_minimal()
+```
+# **III. PHÂN TÍCH NÂNG CAO**
+
+## 🔹 3.1. Kết nối với dữ liệu
+
+Trước khi phân tích, chúng ta cần đọc dữ liệu từ file Excel đã lọc ở phần trước.
+
+```{r}
+# Load thư viện
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+# Đường dẫn thư mục
+path <- "D:/Downloads/Data2/"
+
+# Đọc dữ liệu đã lọc
+filtered_admission <- read_excel(paste0(path, "filtered_admission.xlsx"))
+filtered_diagnosis <- read_excel(paste0(path, "diagnosis_chi_D500_D508_D509.xlsx"))
+```
+
+##🔹 3.2. Phân tích chẩn đoán kèm theoả
+```{r}
+# Lấy tất cả chẩn đoán của bệnh nhân thiếu máu
+all_diag_for_patients <- diagnosis_df %>%
+  filter(admission_id %in% matching_ids)
+
+# Loại bỏ chẩn đoán thiếu máu để phân tích bệnh kèm
+comorbidity <- all_diag_for_patients %>%
+  filter(!diagnosis %in% target_icds)
+
+# Top 20 chẩn đoán kèm theo phổ biến
+top_comorbidity <- comorbidity %>%
+  count(diagnosis) %>%
+  arrange(desc(n)) %>%
+  head(20)
+
+# Biểu đồ chẩn đoán kèm theo
+ggplot(top_comorbidity, aes(x = reorder(diagnosis, n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "20 chẩn đoán kèm theo phổ biến nhất",
+       x = "Mã chẩn đoán", y = "Số lượng") +
+  theme_minimal()
+```
+##🔹 3.3.Phân tích vị trí chẩn đoán thiếu máu
+```{r}
+# Phân tích vị trí chẩn đoán thiếu máu trong danh sách chẩn đoán
+position_stats <- filtered_diag %>%
+  count(position) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Biểu đồ vị trí chẩn đoán
+ggplot(position_stats, aes(x = factor(position), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Vị trí chẩn đoán thiếu máu trong danh sách chẩn đoán",
+       x = "Vị trí", y = "Số lượng") +
+  theme_minimal()
+```
+
+```{r}
+names(filtered_admission)  # xem tên cột
+str(filtered_admission[, c("age_years", "los", "weight")])  # kiểm tra kiểu dữ liệu
+summary(filtered_admission[, c("age_years", "los", "weight")])  # kiểm tra NA
+```
+
+
+##🔹3.4. Phân tích ma trận tương quan
+```{r corrplot-figure, echo=FALSE, fig.width=7, fig.height=7}
+# Cài gói nếu cần
+if (!require("corrplot")) install.packages("corrplot")
+
+# Gọi thư viện
+library(dplyr)
+library(corrplot)
+
+# Xử lý dữ liệu
+corr_data <- filtered_admission %>%
+  select(age_years, los, weight) %>%
+  mutate(
+    weight = na_if(weight, 9999),  # Chuyển 9999 thành NA
+    across(everything(), as.numeric)
+  ) %>%
+  select(where(~ !all(is.na(.))))  # Loại cột toàn NA
+
+# Kiểm tra dữ liệu hợp lệ
+if (ncol(corr_data) < 2) stop("❌ Không đủ biến để vẽ biểu đồ tương quan.")
+if (nrow(corr_data) == 0) stop("❌ Không có dòng dữ liệu hợp lệ.")
+if (all(is.na(cor(corr_data, use = "complete.obs")))) stop("❌ Ma trận tương quan chứa toàn NA.")
+
+# Tính tương quan
+cor_matrix <- cor(corr_data, use = "complete.obs")
+
+# Vẽ biểu đồ
+corrplot(cor_matrix,
+         method = "color",
+         type = "upper",
+         tl.col = "black",
+         tl.srt = 45,
+         addCoef.col = "black",
+         number.cex = 0.7,
+         mar = c(0, 0, 1, 0),
+         title = "🔹 Ma trận tương quan giữa tuổi, thời gian nằm viện và cân nặng")
+
+```
+##🔹 3.5. Phân tích theo nhóm nguy cơ cao
+```{r}
+# Xác định nhóm nguy cơ cao (tuổi > 65 hoặc LOS > 7 ngày)
+filtered_admission <- filtered_admission %>%
+  mutate(high_risk = ifelse(age_years > 65 | los > 7, "Cao", "Thấp"))
+
+# Thống kê nhóm nguy cơ
+risk_stats <- filtered_admission %>%
+  count(high_risk) %>%
+  mutate(Percentage = n / sum(n) * 100)
+
+# Biểu đồ nhóm nguy cơ
+ggplot(risk_stats, aes(x = high_risk, y = n, fill = high_risk)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "Phân bố bệnh nhân theo nhóm nguy cơ",
+       x = "Nhóm nguy cơ", y = "Số lượng") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+##🔹3.6. Xây dựng mô hình dự đoán thời gian nằm viện
+```{r}
+# Cài và gọi thư viện
+if (!require("caret")) install.packages("caret")
+if (!require("ggplot2")) install.packages("ggplot2")
+library(caret)
+library(ggplot2)
+library(dplyr)
+
+# Chuẩn bị dữ liệu cho mô hình
+model_data <- filtered_admission %>%
+  select(age_years, Gender, los, admsource, admtype) %>%
+  mutate_if(is.character, as.factor)
+
+model_data <- na.omit(model_data)
+
+# Chia train/test
+set.seed(123)
+train_index <- createDataPartition(model_data$los, p = 0.8, list = FALSE)
+train_data <- model_data[train_index, ]
+test_data <- model_data[-train_index, ]
+
+# Huấn luyện mô hình hồi quy
+model <- train(
+  los ~ .,
+  data = train_data,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 5)
+)
+
+# Dự đoán
+predictions <- predict(model, newdata = test_data)
+rmse <- sqrt(mean((predictions - test_data$los)^2))
+
+cat("🔍 Hiệu suất mô hình dự đoán LOS:\n")
+cat("📉 RMSE:", round(rmse, 2), "\n")
+
+# Biến đánh giá
+eval_df <- data.frame(
+  Actual = test_data$los,
+  Predicted = predictions,
+  Residual = test_data$los - predictions
+)
+
+# 1️⃣ Biểu đồ scatter: Predicted vs Actual
+ggplot(eval_df, aes(x = Actual, y = Predicted)) +
+  geom_point(color = "steelblue", alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Dự đoán LOS vs. Giá trị thực tế",
+       x = "LOS thực tế",
+       y = "LOS dự đoán") +
+  theme_minimal()
+
+# 2️⃣ Biểu đồ residuals
+ggplot(eval_df, aes(x = Predicted, y = Residual)) +
+  geom_point(color = "darkorange", alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
+  labs(title = "Phân tích sai số dự đoán (residuals)",
+       x = "LOS dự đoán",
+       y = "Sai số (Residual)") +
+  theme_minimal()
+```
+
+##🔹 3.7.Kiểm định T-test: Thời gian nằm viện giữa nam và nữ
+```{r ttest-los-gender, message=FALSE, warning=FALSE}
+# Chuyển giới tính về dạng số nếu chưa (Nam = 1, Nữ = 2)
+# filtered_admission$Gender <- ifelse(filtered_admission$Gender == "Nam", 1, 2)
+
+# Tạo 2 nhóm LOS theo giới tính
+male_los <- filtered_admission %>% filter(Gender == 1) %>% pull(los)
+female_los <- filtered_admission %>% filter(Gender == 2) %>% pull(los)
+
+# Thực hiện kiểm định t-test độc lập
+ttest_result <- t.test(male_los, female_los)
+
+# In kết quả
+ttest_result
+```
+```{r}
+cat("**🎯 Kết luận kiểm định T-test:**\n\n")
+cat("- T-statistic: ", round(ttest_result$statistic, 3), "\n")
+cat("- P-value: ", round(ttest_result$p.value, 4), "\n\n")
+
+if (ttest_result$p.value < 0.05) {
+  cat("✅ Có sự khác biệt có ý nghĩa thống kê giữa thời gian nằm viện của nam và nữ.")
+} else {
+  cat("ℹ️ Không có sự khác biệt có ý nghĩa thống kê giữa thời gian nằm viện của nam và nữ.")
+}
+```
+
